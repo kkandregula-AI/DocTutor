@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#0a0a0c" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="DocTutor" />
+<title>DocTutor · Your document, your tutor</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+<!-- Parsers -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<style>
+  :root{
+    --bg:#0a0a0c; --bg2:#111114; --bg3:#17171c;
+    --panel:#0e0e12;
+    --line:rgba(212,175,55,.18);
+    --line-soft:rgba(244,241,234,.08);
+    --gold:#d4af37; --gold-soft:#e8d9a0; --gold-dim:rgba(212,175,55,.55);
+    --ink:#f4f1ea; --muted:#9a968c; --muted-2:#6f6c64;
+    --good:#6cc0a4; --bad:#d98b7a;
+    --radius:14px;
+    --maxw:880px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:
+      radial-gradient(1100px 600px at 50% -10%, rgba(212,175,55,.06), transparent 60%),
+      var(--bg);
+    color:var(--ink);
+    font-family:"DM Sans",system-ui,-apple-system,sans-serif;
+    line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+    min-height:100dvh;
+    padding-bottom:env(safe-area-inset-bottom);
+  }
+  ::selection{background:rgba(212,175,55,.28)}
+  button{font-family:inherit;cursor:pointer}
+  a{color:var(--gold-soft)}
+
+  /* ---------- shell ---------- */
+  .topbar{
+    position:sticky;top:0;z-index:40;
+    backdrop-filter:saturate(140%) blur(14px);
+    background:rgba(10,10,12,.72);
+    border-bottom:1px solid var(--line-soft);
+    padding:calc(env(safe-area-inset-top) + 12px) 18px 12px;
+  }
+  .topbar-inner{max-width:var(--maxw);margin:0 auto;display:flex;align-items:center;gap:14px}
+  .brand{display:flex;align-items:baseline;gap:10px;min-width:0}
+  .brand .deva{font-family:"Cinzel",serif;font-weight:700;color:var(--gold);font-size:20px;letter-spacing:.5px}
+  .brand .name{font-family:"Cinzel",serif;font-weight:600;font-size:15px;letter-spacing:2.5px;text-transform:uppercase}
+  .brand .tag{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .spacer{flex:1}
+  .ghost-btn{
+    background:transparent;border:1px solid var(--line);color:var(--ink);
+    padding:8px 13px;border-radius:10px;font-size:12.5px;font-weight:500;
+    display:inline-flex;align-items:center;gap:7px;transition:.18s;white-space:nowrap;
+  }
+  .ghost-btn:hover{border-color:var(--gold-dim);background:rgba(212,175,55,.06)}
+  .ghost-btn .dot{width:7px;height:7px;border-radius:50%;background:var(--bad)}
+  .ghost-btn .dot.ok{background:var(--good)}
+
+  main{max-width:var(--maxw);margin:0 auto;padding:26px 18px 60px}
+
+  /* ---------- hero / upload ---------- */
+  .hero{text-align:center;padding:38px 8px 14px;animation:rise .7s ease both}
+  .hero .eyebrow{
+    font-family:"DM Mono",monospace;font-size:11px;letter-spacing:4px;
+    color:var(--gold-dim);text-transform:uppercase;margin-bottom:18px;
+  }
+  .hero h1{
+    font-family:"Cinzel",serif;font-weight:700;
+    font-size:clamp(30px,7vw,52px);line-height:1.04;margin:0 0 14px;
+    letter-spacing:.5px;
+  }
+  .hero h1 .glyph{color:var(--gold);display:block;font-size:.7em;letter-spacing:6px;margin-bottom:6px}
+  .hero p.lede{color:var(--muted);font-size:16px;max-width:460px;margin:0 auto 4px}
+
+  .drop{
+    margin:30px auto 0;max-width:560px;
+    border:1px dashed var(--line);border-radius:var(--radius);
+    background:linear-gradient(180deg, rgba(212,175,55,.035), rgba(255,255,255,.01));
+    padding:38px 26px;transition:.2s;position:relative;overflow:hidden;
+  }
+  .drop::before{
+    content:"";position:absolute;inset:0;
+    background:linear-gradient(120deg,transparent 30%,rgba(212,175,55,.07) 50%,transparent 70%);
+    transform:translateX(-100%);transition:.6s;pointer-events:none;
+  }
+  .drop:hover::before{transform:translateX(100%)}
+  .drop.drag{border-color:var(--gold);background:rgba(212,175,55,.08)}
+  .drop .ico{font-size:30px;margin-bottom:12px;opacity:.9}
+  .drop h3{font-family:"Cinzel",serif;font-weight:600;font-size:18px;margin:0 0 6px}
+  .drop p{color:var(--muted);font-size:13.5px;margin:0 0 18px}
+  .primary-btn{
+    background:linear-gradient(180deg,var(--gold-soft),var(--gold));
+    color:#1a1407;border:none;padding:11px 22px;border-radius:11px;
+    font-weight:600;font-size:14px;letter-spacing:.3px;transition:.18s;
+    box-shadow:0 6px 22px rgba(212,175,55,.18);
+  }
+  .primary-btn:hover{transform:translateY(-1px);box-shadow:0 10px 28px rgba(212,175,55,.26)}
+  .primary-btn:active{transform:translateY(0)}
+  .primary-btn:disabled{opacity:.5;cursor:not-allowed;transform:none;box-shadow:none}
+  .fmt-row{margin-top:16px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+  .fmt{font-family:"DM Mono",monospace;font-size:10.5px;letter-spacing:1px;color:var(--muted-2);
+    border:1px solid var(--line-soft);padding:4px 9px;border-radius:6px}
+  .privacy{margin-top:22px;font-size:12px;color:var(--muted-2);max-width:480px;margin-left:auto;margin-right:auto}
+  .privacy b{color:var(--muted);font-weight:600}
+
+  /* ---------- doc loaded ---------- */
+  .docwrap{animation:rise .5s ease both}
+  .source-card{
+    border:1px solid var(--line);border-radius:var(--radius);
+    background:linear-gradient(180deg,rgba(212,175,55,.05),var(--panel));
+    padding:16px 18px;display:flex;align-items:center;gap:16px;
+    position:relative;
+  }
+  .source-card::before{
+    content:"SOURCE TEXT";position:absolute;top:-8px;left:16px;
+    font-family:"DM Mono",monospace;font-size:9px;letter-spacing:3px;color:var(--gold-dim);
+    background:var(--bg);padding:0 8px;
+  }
+  .source-ico{
+    width:42px;height:42px;flex:none;border-radius:9px;
+    border:1px solid var(--line);display:grid;place-items:center;
+    font-size:18px;background:rgba(212,175,55,.06);
+  }
+  .source-meta{min-width:0;flex:1}
+  .source-meta .fn{font-weight:600;font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .source-meta .st{font-family:"DM Mono",monospace;font-size:11px;color:var(--muted);margin-top:3px;letter-spacing:.3px}
+  .source-meta .st .warn{color:var(--bad)}
+
+  .tabs{display:flex;gap:4px;margin:22px 0 18px;border-bottom:1px solid var(--line-soft);position:sticky;top:64px;z-index:30;background:var(--bg)}
+  .tab{
+    background:transparent;border:none;color:var(--muted);
+    padding:12px 4px;margin-right:18px;font-size:14px;font-weight:500;
+    border-bottom:2px solid transparent;transition:.18s;display:flex;align-items:center;gap:7px;
+  }
+  .tab .n{font-family:"DM Mono",monospace;font-size:11px;color:var(--muted-2)}
+  .tab:hover{color:var(--ink)}
+  .tab.active{color:var(--gold);border-bottom-color:var(--gold)}
+  .tab.active .n{color:var(--gold-dim)}
+  .panel{display:none;animation:fade .35s ease both}
+  .panel.active{display:block}
+
+  /* summary */
+  .sum-body{font-size:15px;color:var(--ink)}
+  .sum-body h4{font-family:"Cinzel",serif;color:var(--gold-soft);font-size:14px;letter-spacing:.5px;margin:20px 0 8px}
+  .sum-body p{margin:0 0 12px;color:#d9d6cd}
+  .sum-body ul{margin:0 0 12px;padding-left:20px;color:#d9d6cd}
+  .sum-body li{margin-bottom:6px}
+  .sum-body strong{color:var(--ink)}
+
+  /* ask / chat */
+  .chat{display:flex;flex-direction:column;gap:14px;margin-bottom:18px}
+  .msg{max-width:90%;font-size:14.5px}
+  .msg.u{align-self:flex-end;background:rgba(212,175,55,.1);border:1px solid var(--line);
+    padding:10px 14px;border-radius:14px 14px 4px 14px;color:var(--ink)}
+  .msg.a{align-self:flex-start;color:#d9d6cd}
+  .msg.a .a-head{font-family:"DM Mono",monospace;font-size:10px;letter-spacing:2px;color:var(--gold-dim);margin-bottom:6px}
+  .msg.a p{margin:0 0 9px}
+  .msg.a ul{margin:0 0 9px;padding-left:18px}
+  .msg.a .cite{font-size:12px;color:var(--muted-2);border-left:2px solid var(--line);padding-left:9px;margin-top:8px;font-style:italic}
+  .empty-ask{color:var(--muted-2);font-size:13.5px;text-align:center;padding:24px 0;border:1px dashed var(--line-soft);border-radius:12px}
+  .suggest{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;justify-content:center}
+  .chip{background:transparent;border:1px solid var(--line-soft);color:var(--muted);
+    font-size:12px;padding:7px 12px;border-radius:20px;transition:.16s}
+  .chip:hover{border-color:var(--gold-dim);color:var(--ink)}
+
+  .ask-bar{display:flex;gap:10px;align-items:flex-end;
+    position:sticky;bottom:0;background:linear-gradient(180deg,transparent,var(--bg) 22%);padding:12px 0 4px}
+  .ask-bar textarea{
+    flex:1;resize:none;background:var(--bg2);border:1px solid var(--line);
+    color:var(--ink);border-radius:12px;padding:12px 14px;font-family:inherit;font-size:14.5px;
+    max-height:120px;line-height:1.4;
+  }
+  .ask-bar textarea:focus{outline:none;border-color:var(--gold-dim)}
+  .send{width:46px;height:46px;flex:none;border-radius:12px;border:none;
+    background:linear-gradient(180deg,var(--gold-soft),var(--gold));color:#1a1407;font-size:18px;
+    display:grid;place-items:center;transition:.16s}
+  .send:disabled{opacity:.45;cursor:not-allowed}
+
+  /* quiz */
+  .quiz-ctrl{border:1px solid var(--line-soft);border-radius:12px;padding:16px;margin-bottom:18px;background:var(--panel)}
+  .ctrl-row{display:flex;flex-wrap:wrap;gap:18px;align-items:flex-end}
+  .field label{display:block;font-family:"DM Mono",monospace;font-size:10px;letter-spacing:2px;
+    color:var(--muted);text-transform:uppercase;margin-bottom:7px}
+  .segmented{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .segmented button{background:transparent;border:none;color:var(--muted);padding:8px 12px;font-size:12.5px;transition:.15s;border-right:1px solid var(--line-soft)}
+  .segmented button:last-child{border-right:none}
+  .segmented button.on{background:rgba(212,175,55,.14);color:var(--gold)}
+  select.mini,input.mini{background:var(--bg2);border:1px solid var(--line);color:var(--ink);
+    border-radius:9px;padding:8px 10px;font-family:inherit;font-size:13px}
+  .quiz-list{display:flex;flex-direction:column;gap:14px}
+  .q-card{border:1px solid var(--line-soft);border-radius:12px;padding:15px 16px;background:var(--bg2)}
+  .q-card .qn{font-family:"DM Mono",monospace;font-size:11px;color:var(--gold-dim);margin-bottom:8px;letter-spacing:1px}
+  .q-card .qt{font-size:15px;color:var(--ink);margin-bottom:10px;font-weight:500}
+  .opts{display:flex;flex-direction:column;gap:7px;margin-bottom:6px}
+  .opt{display:flex;gap:9px;align-items:flex-start;font-size:14px;color:#d4d0c7;
+    border:1px solid var(--line-soft);border-radius:9px;padding:9px 11px;cursor:pointer;transition:.14s}
+  .opt:hover{border-color:var(--gold-dim)}
+  .opt .lt{font-family:"DM Mono",monospace;color:var(--muted);flex:none}
+  .opt.correct{border-color:var(--good);background:rgba(108,192,164,.08)}
+  .opt.correct .lt{color:var(--good)}
+  .opt.wrong{border-color:var(--bad);background:rgba(217,139,122,.07)}
+  .reveal-btn{background:transparent;border:1px solid var(--line);color:var(--muted);
+    font-size:12px;padding:6px 11px;border-radius:8px;margin-top:6px;transition:.15s}
+  .reveal-btn:hover{border-color:var(--gold-dim);color:var(--ink)}
+  .answer-box{margin-top:10px;border-left:2px solid var(--good);padding:8px 12px;
+    background:rgba(108,192,164,.05);border-radius:0 8px 8px 0;font-size:13.5px;color:#cfd8d2;display:none}
+  .answer-box.show{display:block}
+  .answer-box .lbl{font-family:"DM Mono",monospace;font-size:9px;letter-spacing:2px;color:var(--good);text-transform:uppercase;margin-bottom:4px}
+  .quiz-actions{display:flex;gap:10px;margin:18px 0 4px;flex-wrap:wrap}
+
+  /* shared */
+  .spinner{width:16px;height:16px;border:2px solid rgba(212,175,55,.25);border-top-color:var(--gold);
+    border-radius:50%;animation:spin .7s linear infinite;display:inline-block;vertical-align:-3px}
+  .loading-line{color:var(--muted);font-size:13.5px;display:flex;align-items:center;gap:10px;padding:8px 0}
+  .typing{display:inline-flex;gap:4px}
+  .typing span{width:6px;height:6px;border-radius:50%;background:var(--gold-dim);animation:blink 1.2s infinite}
+  .typing span:nth-child(2){animation-delay:.2s}
+  .typing span:nth-child(3){animation-delay:.4s}
+
+  /* modal */
+  .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.66);backdrop-filter:blur(4px);
+    z-index:60;display:none;align-items:center;justify-content:center;padding:20px}
+  .modal-bg.show{display:flex}
+  .modal{background:var(--bg2);border:1px solid var(--line);border-radius:16px;
+    max-width:430px;width:100%;padding:24px;animation:rise .3s ease both}
+  .modal h3{font-family:"Cinzel",serif;font-size:18px;margin:0 0 6px;color:var(--gold-soft)}
+  .modal .sub{color:var(--muted);font-size:13px;margin:0 0 18px}
+  .modal label{display:block;font-family:"DM Mono",monospace;font-size:10px;letter-spacing:2px;
+    color:var(--muted);text-transform:uppercase;margin:14px 0 7px}
+  .modal input,.modal select{width:100%;background:var(--bg3);border:1px solid var(--line);
+    color:var(--ink);border-radius:10px;padding:11px 13px;font-family:inherit;font-size:14px}
+  .modal input:focus,.modal select:focus{outline:none;border-color:var(--gold-dim)}
+  .modal .hint{font-size:11.5px;color:var(--muted-2);margin-top:7px}
+  .modal-actions{display:flex;gap:10px;margin-top:22px}
+  .modal-actions .primary-btn{flex:1}
+
+  /* toast */
+  .toast{position:fixed;left:50%;transform:translateX(-50%) translateY(20px);
+    bottom:calc(20px + env(safe-area-inset-bottom));background:var(--bg3);
+    border:1px solid var(--line);color:var(--ink);padding:11px 18px;border-radius:11px;
+    font-size:13.5px;z-index:80;opacity:0;transition:.3s;max-width:90vw;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .toast.err{border-color:var(--bad);color:#f0c4ba}
+
+  footer{max-width:var(--maxw);margin:0 auto;padding:30px 18px 40px;text-align:center;
+    border-top:1px solid var(--line-soft);margin-top:30px}
+  footer .sig{font-size:11.5px;color:var(--muted-2);letter-spacing:.3px}
+  footer .sig b{color:var(--muted);font-weight:600}
+
+  @keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+  @keyframes fade{from{opacity:0}to{opacity:1}}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes blink{0%,60%,100%{opacity:.3}30%{opacity:1}}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+  @media (max-width:560px){
+    .brand .tag{display:none}
+    .hero{padding-top:24px}
+    .ctrl-row{gap:14px}
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <span class="deva">◆</span>
+      <span class="name">DocTutor</span>
+      <span class="tag">— your document, your tutor</span>
+    </div>
+    <div class="spacer"></div>
+    <button class="ghost-btn" id="keyBtn" onclick="openSettings()">
+      <span class="dot" id="keyDot"></span> API Key
+    </button>
+  </div>
+</div>
+
+<main>
+  <!-- UPLOAD STATE -->
+  <section id="uploadView">
+    <div class="hero">
+      <div class="eyebrow">Read · Understand · Practise</div>
+      <h1>Bring a document.<br/>Leave understanding.</h1>
+      <p class="lede">Upload your notes, textbook chapter, PDF or spreadsheet. Get a clear summary, ask anything, and generate practice questions — all answered strictly from your file.</p>
+    </div>
+
+    <div class="drop" id="drop">
+      <div class="ico">📄</div>
+      <h3>Drop a file or browse</h3>
+      <p>Word, PDF or Excel — up to a full chapter works best</p>
+      <button class="primary-btn" id="browseBtn">Choose a document</button>
+      <input type="file" id="fileInput" accept=".pdf,.docx,.xlsx,.xls,.csv" style="display:none" />
+      <div class="fmt-row">
+        <span class="fmt">.PDF</span><span class="fmt">.DOCX</span>
+        <span class="fmt">.XLSX</span><span class="fmt">.CSV</span>
+      </div>
+    </div>
+
+    <p class="privacy">
+      <b>Your file stays in your browser.</b> Parsing happens on your device. Only the text needed to answer a question is sent to Claude through your own API key — nothing is uploaded to any server of ours.
+    </p>
+  </section>
+
+  <!-- DOCUMENT STATE -->
+  <section id="docView" style="display:none">
+    <div class="docwrap">
+      <div class="source-card">
+        <div class="source-ico" id="srcIco">📄</div>
+        <div class="source-meta">
+          <div class="fn" id="srcName">document.pdf</div>
+          <div class="st" id="srcStats">—</div>
+        </div>
+        <button class="ghost-btn" onclick="resetDoc()">Replace</button>
+      </div>
+
+      <div class="tabs">
+        <button class="tab active" data-tab="summary" onclick="switchTab('summary')"><span class="n">01</span> Summary</button>
+        <button class="tab" data-tab="ask" onclick="switchTab('ask')"><span class="n">02</span> Ask</button>
+        <button class="tab" data-tab="quiz" onclick="switchTab('quiz')"><span class="n">03</span> Practice</button>
+      </div>
+
+      <!-- SUMMARY -->
+      <div class="panel active" id="panel-summary">
+        <div id="summaryArea">
+          <div class="loading-line"><span class="spinner"></span> Reading your document…</div>
+        </div>
+      </div>
+
+      <!-- ASK -->
+      <div class="panel" id="panel-ask">
+        <div class="chat" id="chat">
+          <div class="empty-ask">
+            Ask anything about your document. Every answer comes from the text you uploaded.
+            <div class="suggest" id="suggest">
+              <button class="chip" onclick="quickAsk('Explain the main idea in simple terms')">Explain the main idea</button>
+              <button class="chip" onclick="quickAsk('What are the most important points I should remember?')">Key points to remember</button>
+              <button class="chip" onclick="quickAsk('Give me a real-world example of a concept from this document')">Give an example</button>
+            </div>
+          </div>
+        </div>
+        <div class="ask-bar">
+          <textarea id="askInput" rows="1" placeholder="Ask about your document…"></textarea>
+          <button class="send" id="sendBtn" onclick="sendQuestion()">↑</button>
+        </div>
+      </div>
+
+      <!-- QUIZ -->
+      <div class="panel" id="panel-quiz">
+        <div class="quiz-ctrl">
+          <div class="ctrl-row">
+            <div class="field">
+              <label>Question type</label>
+              <div class="segmented" id="qtype">
+                <button class="on" data-v="mcq">Multiple choice</button>
+                <button data-v="short">One-line</button>
+                <button data-v="long">Paragraph</button>
+              </div>
+            </div>
+            <div class="field">
+              <label>Count</label>
+              <select class="mini" id="qcount">
+                <option>3</option><option selected>5</option><option>8</option><option>10</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Difficulty</label>
+              <select class="mini" id="qdiff">
+                <option>Easy</option><option selected>Medium</option><option>Hard</option>
+              </select>
+            </div>
+            <div class="field">
+              <button class="primary-btn" id="genBtn" onclick="generateQuiz()">Generate</button>
+            </div>
+          </div>
+        </div>
+        <div id="quizArea">
+          <div class="empty-ask">Pick a type and tap Generate. Questions are written from your document, with answers you can reveal.</div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="sig">Designed &amp; Architected by <b>Krishnamurthy Kandregula</b> · Made by Claude</div>
+</footer>
+
+<!-- SETTINGS MODAL -->
+<div class="modal-bg" id="settingsModal">
+  <div class="modal">
+    <h3>Connect Claude</h3>
+    <p class="sub">DocTutor runs on your own Anthropic API key. It's stored only in this browser.</p>
+    <label>Anthropic API Key</label>
+    <input type="password" id="keyInput" placeholder="sk-ant-..." autocomplete="off" />
+    <div class="hint">Get one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a></div>
+    <label>Model</label>
+    <select id="modelInput">
+      <option value="claude-sonnet-4-6">Claude Sonnet 4.6 — best comprehension</option>
+      <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 — faster &amp; cheaper</option>
+    </select>
+    <div class="modal-actions">
+      <button class="ghost-btn" onclick="closeSettings()">Cancel</button>
+      <button class="primary-btn" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ===================== config / state ===================== */
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+const MAX_CHARS = 600000; // ~150k tokens grounding cap
+const S = {
+  apiKey: "",
+  model: "claude-sonnet-4-6",
+  doc: null,        // { name, ext, text, words, tokens, units }
+  truncated: false,
+  history: [],      // chat turns {role, content}
+  summaryDone: false
+};
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+/* ===================== settings ===================== */
+function loadSettings(){
+  try{
+    const raw = localStorage.getItem("doctutor_settings");
+    if(raw){ const o = JSON.parse(raw); S.apiKey = o.apiKey||""; S.model = o.model||S.model; }
+  }catch(e){}
+  $("modelInput").value = S.model;
+  reflectKey();
+}
+function reflectKey(){
+  const ok = !!S.apiKey;
+  $("keyDot").classList.toggle("ok", ok);
+  $("keyBtn").lastChild.textContent = ok ? " Connected" : " API Key";
+}
+function openSettings(){ $("keyInput").value = S.apiKey; $("modelInput").value = S.model; $("settingsModal").classList.add("show"); }
+function closeSettings(){ $("settingsModal").classList.remove("show"); }
+function saveSettings(){
+  S.apiKey = $("keyInput").value.trim();
+  S.model = $("modelInput").value;
+  try{ localStorage.setItem("doctutor_settings", JSON.stringify({apiKey:S.apiKey, model:S.model})); }catch(e){}
+  reflectKey(); closeSettings();
+  toast(S.apiKey ? "Claude connected." : "Key cleared.");
+}
+
+/* ===================== toast ===================== */
+let toastT;
+function toast(msg, isErr){
+  const t = $("toast"); t.textContent = msg; t.classList.toggle("err", !!isErr); t.classList.add("show");
+  clearTimeout(toastT); toastT = setTimeout(()=>t.classList.remove("show"), 3200);
+}
+
+/* ===================== file handling ===================== */
+const drop = $("drop"), fileInput = $("fileInput");
+$("browseBtn").onclick = ()=> fileInput.click();
+fileInput.onchange = (e)=>{ if(e.target.files[0]) handleFile(e.target.files[0]); };
+["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("drag");}));
+["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("drag");}));
+drop.addEventListener("drop", e=>{ if(e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); });
+
+const ICONS = { pdf:"📕", docx:"📘", xlsx:"📗", csv:"📗", default:"📄" };
+
+async function handleFile(file){
+  const ext = (file.name.split(".").pop()||"").toLowerCase();
+  if(!["pdf","docx","xlsx","xls","csv"].includes(ext)){
+    return toast("Unsupported file. Use PDF, Word, Excel or CSV.", true);
+  }
+  showDocView(file.name, ext);
+  $("srcStats").innerHTML = '<span class="spinner"></span> extracting text…';
+  try{
+    const buf = await file.arrayBuffer();
+    let text = "";
+    let units = "";
+    if(ext === "pdf"){ const r = await extractPdf(buf); text = r.text; units = r.pages + " pages"; }
+    else if(ext === "docx"){ text = await extractDocx(buf); }
+    else { const r = extractSheet(buf, ext); text = r.text; units = r.sheets; }
+
+    text = text.replace(/\n{3,}/g,"\n\n").trim();
+    if(!text || text.length < 20){
+      $("srcStats").innerHTML = '<span class="warn">No selectable text found. If this is a scanned PDF, OCR isn\'t supported yet.</span>';
+      toast("Couldn't read text from this file.", true);
+      return;
+    }
+    S.truncated = text.length > MAX_CHARS;
+    if(S.truncated) text = text.slice(0, MAX_CHARS);
+
+    const words = (text.match(/\S+/g)||[]).length;
+    const tokens = Math.round(text.length/4);
+    S.doc = { name:file.name, ext, text, words, tokens, units };
+    S.history = []; S.summaryDone = false;
+
+    let stat = words.toLocaleString() + " words · ~" + tokens.toLocaleString() + " tokens";
+    if(units) stat += " · " + units;
+    if(S.truncated) stat += ' · <span class="warn">trimmed to fit</span>';
+    $("srcStats").innerHTML = stat;
+
+    // reset panels
+    switchTab("summary");
+    resetAskPanel();
+    $("quizArea").innerHTML = '<div class="empty-ask">Pick a type and tap Generate. Questions are written from your document, with answers you can reveal.</div>';
+
+    if(!S.apiKey){ $("summaryArea").innerHTML = needKeyBlock("summarise this document"); return; }
+    runSummary();
+  }catch(err){
+    console.error(err);
+    $("srcStats").innerHTML = '<span class="warn">Failed to read file.</span>';
+    toast("Error reading file: " + (err.message||"unknown"), true);
+  }
+}
+
+async function extractPdf(buf){
+  const pdf = await pdfjsLib.getDocument({data:buf}).promise;
+  let out = [];
+  for(let i=1;i<=pdf.numPages;i++){
+    const page = await pdf.getPage(i);
+    const c = await page.getTextContent();
+    out.push(c.items.map(it=>it.str).join(" "));
+  }
+  return { text: out.join("\n\n"), pages: pdf.numPages };
+}
+async function extractDocx(buf){
+  const r = await mammoth.extractRawText({arrayBuffer:buf});
+  return r.value || "";
+}
+function extractSheet(buf, ext){
+  const wb = XLSX.read(new Uint8Array(buf), {type:"array"});
+  let parts = [];
+  wb.SheetNames.forEach(name=>{
+    const csv = XLSX.utils.sheet_to_csv(wb.Sheets[name]);
+    if(csv.trim()) parts.push("### Sheet: " + name + "\n" + csv);
+  });
+  const label = wb.SheetNames.length>1 ? wb.SheetNames.length+" sheets" : "1 sheet";
+  return { text: parts.join("\n\n"), sheets: (ext==="csv" ? "" : label) };
+}
+
+function showDocView(name, ext){
+  $("uploadView").style.display = "none";
+  $("docView").style.display = "block";
+  $("srcName").textContent = name;
+  $("srcIco").textContent = ICONS[ext] || ICONS.default;
+  window.scrollTo({top:0});
+}
+function resetDoc(){
+  S.doc = null; S.history = []; S.summaryDone = false;
+  $("docView").style.display = "none";
+  $("uploadView").style.display = "block";
+  fileInput.value = "";
+}
+
+/* ===================== tabs ===================== */
+function switchTab(t){
+  document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active", b.dataset.tab===t));
+  document.querySelectorAll(".panel").forEach(p=>p.classList.remove("active"));
+  $("panel-"+t).classList.add("active");
+  if(t==="summary" && S.doc && S.apiKey && !S.summaryDone) runSummary();
+}
+
+/* ===================== Claude API ===================== */
+async function callClaude(system, messages, maxTokens){
+  if(!S.apiKey){ throw new Error("NO_KEY"); }
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method:"POST",
+    headers:{
+      "Content-Type":"application/json",
+      "x-api-key":S.apiKey,
+      "anthropic-version":"2023-06-01",
+      "anthropic-dangerous-direct-browser-access":"true"
+    },
+    body: JSON.stringify({ model:S.model, max_tokens:maxTokens, system, messages })
+  });
+  if(!res.ok){
+    let detail = "";
+    try{ const j = await res.json(); detail = j.error?.message || ""; }catch(e){}
+    if(res.status===401) throw new Error("Invalid API key. Check it in settings.");
+    if(res.status===429) throw new Error("Rate limited. Wait a moment and retry.");
+    if(res.status===400 && /credit|balance/i.test(detail)) throw new Error("No API credit on this key.");
+    throw new Error(detail || ("API error "+res.status));
+  }
+  const data = await res.json();
+  return data.content.filter(b=>b.type==="text").map(b=>b.text).join("\n");
+}
+function docContext(){
+  return "=== DOCUMENT: " + S.doc.name + " ===\n\n" + S.doc.text + "\n\n=== END OF DOCUMENT ===";
+}
+function needKeyBlock(action){
+  return '<div class="empty-ask">Add your Claude API key to '+action+'.<br/><br/>'
+       + '<button class="primary-btn" onclick="openSettings()">Connect Claude</button></div>';
+}
+
+/* ===================== summary ===================== */
+async function runSummary(){
+  if(!S.doc) return;
+  S.summaryDone = true;
+  $("summaryArea").innerHTML = '<div class="loading-line"><span class="spinner"></span> Summarising your document…</div>';
+  const system =
+    "You are a precise study assistant. Summarise ONLY the document provided below — never add outside facts. "
+    + "Write for a student. Use this exact HTML structure with these tags only (h4, p, ul, li, strong): "
+    + "an <h4>Overview</h4> with one short paragraph; an <h4>Key Points</h4> with a <ul> of 4-7 concise bullets; "
+    + "and an <h4>Worth Remembering</h4> with one paragraph naming the few things most likely to be tested or to matter. "
+    + "Do not wrap output in code fences.\n\n" + docContext();
+  try{
+    const out = await callClaude(system, [{role:"user", content:"Summarise this document."}], 1400);
+    $("summaryArea").innerHTML = '<div class="sum-body">' + cleanHtml(out) + '</div>';
+  }catch(err){
+    S.summaryDone = false;
+    if(err.message==="NO_KEY"){ $("summaryArea").innerHTML = needKeyBlock("summarise this document"); return; }
+    $("summaryArea").innerHTML = '<div class="empty-ask">'+esc(err.message)+'<br/><br/><button class="ghost-btn" onclick="runSummary()">Try again</button></div>';
+  }
+}
+function cleanHtml(s){
+  return s.replace(/```html?/gi,"").replace(/```/g,"").trim();
+}
+
+/* ===================== ask ===================== */
+const askInput = $("askInput");
+askInput.addEventListener("input", ()=>{ askInput.style.height="auto"; askInput.style.height=Math.min(askInput.scrollHeight,120)+"px"; });
+askInput.addEventListener("keydown", e=>{ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); sendQuestion(); }});
+
+function resetAskPanel(){
+  $("chat").innerHTML =
+    '<div class="empty-ask">Ask anything about your document. Every answer comes from the text you uploaded.'
+    + '<div class="suggest">'
+    + '<button class="chip" onclick="quickAsk(\'Explain the main idea in simple terms\')">Explain the main idea</button>'
+    + '<button class="chip" onclick="quickAsk(\'What are the most important points I should remember?\')">Key points to remember</button>'
+    + '<button class="chip" onclick="quickAsk(\'Give me a real-world example of a concept from this document\')">Give an example</button>'
+    + '</div></div>';
+}
+function quickAsk(q){ askInput.value=q; sendQuestion(); }
+
+async function sendQuestion(){
+  const q = askInput.value.trim();
+  if(!q || !S.doc) return;
+  if(!S.apiKey){ openSettings(); return toast("Add your Claude API key first.", true); }
+
+  const chat = $("chat");
+  const emptyEl = chat.querySelector(".empty-ask"); if(emptyEl) emptyEl.remove();
+
+  chat.insertAdjacentHTML("beforeend", '<div class="msg u">'+esc(q)+'</div>');
+  askInput.value=""; askInput.style.height="auto";
+  const thinkId = "t"+Date.now();
+  chat.insertAdjacentHTML("beforeend",
+    '<div class="msg a" id="'+thinkId+'"><div class="a-head">TUTOR</div><div class="typing"><span></span><span></span><span></span></div></div>');
+  chat.scrollIntoView({block:"end"}); window.scrollTo({top:document.body.scrollHeight,behavior:"smooth"});
+  $("sendBtn").disabled = true;
+
+  const system =
+    "You are a tutor answering questions strictly from the document below. "
+    + "Rules: (1) Use ONLY information in the document. (2) If the answer is not in the document, say clearly that the document doesn't cover it — do not guess. "
+    + "(3) Be clear and concise for a student. (4) When helpful, briefly point to where in the document it comes from. "
+    + "Output plain readable text; you may use short paragraphs and simple bullet lines starting with '- '.\n\n" + docContext();
+
+  S.history.push({role:"user", content:q});
+  const msgs = S.history.slice(-8);
+  try{
+    const out = await callClaude(system, msgs, 1100);
+    S.history.push({role:"assistant", content:out});
+    $(thinkId).innerHTML = '<div class="a-head">TUTOR</div>' + renderAnswer(out);
+  }catch(err){
+    $(thinkId).innerHTML = '<div class="a-head">TUTOR</div><p style="color:var(--bad)">'+esc(err.message==="NO_KEY"?"Add your API key in settings.":err.message)+'</p>';
+  }finally{
+    $("sendBtn").disabled = false;
+    window.scrollTo({top:document.body.scrollHeight,behavior:"smooth"});
+  }
+}
+function renderAnswer(t){
+  const lines = t.trim().split("\n");
+  let html="", inList=false;
+  for(let raw of lines){
+    const line = raw.trim();
+    if(/^[-•]\s+/.test(line)){
+      if(!inList){ html+="<ul>"; inList=true; }
+      html += "<li>"+esc(line.replace(/^[-•]\s+/,""))+"</li>";
+    }else{
+      if(inList){ html+="</ul>"; inList=false; }
+      if(line) html += "<p>"+esc(line)+"</p>";
+    }
+  }
+  if(inList) html+="</ul>";
+  return html;
+}
+
+/* ===================== quiz ===================== */
+document.querySelectorAll("#qtype button").forEach(b=>{
+  b.onclick = ()=>{ document.querySelectorAll("#qtype button").forEach(x=>x.classList.remove("on")); b.classList.add("on"); };
+});
+let lastQuiz = null;
+
+async function generateQuiz(){
+  if(!S.doc) return;
+  if(!S.apiKey){ openSettings(); return toast("Add your Claude API key first.", true); }
+  const type = document.querySelector("#qtype button.on").dataset.v;
+  const count = $("qcount").value;
+  const diff = $("qdiff").value;
+  $("genBtn").disabled = true;
+  $("quizArea").innerHTML = '<div class="loading-line"><span class="spinner"></span> Writing '+count+' '+diff.toLowerCase()+' questions…</div>';
+
+  let shape;
+  if(type==="mcq") shape = '{"questions":[{"q":"question text","options":["A text","B text","C text","D text"],"correct":0,"why":"one-line reason from the document"}]}';
+  else if(type==="short") shape = '{"questions":[{"q":"question text","answer":"the correct one-line answer"}]}';
+  else shape = '{"questions":[{"q":"question text","answer":"a model paragraph answer drawn from the document"}]}';
+
+  const typeName = type==="mcq" ? "multiple-choice (4 options each, exactly one correct)"
+                  : type==="short" ? "one-line short-answer" : "paragraph-length";
+  const system =
+    "You write exam practice questions based ONLY on the document below. Every question and answer must be answerable from the document — no outside knowledge. "
+    + "Difficulty: "+diff+". Create "+count+" "+typeName+" questions. "
+    + "Respond with ONLY valid JSON, no markdown, no commentary, in exactly this shape: "+shape+" "
+    + "For MCQ, 'correct' is the 0-based index of the right option.\n\n" + docContext();
+  try{
+    const out = await callClaude(system, [{role:"user", content:"Generate the questions as JSON only."}], 3200);
+    const json = JSON.parse(out.replace(/```json?/gi,"").replace(/```/g,"").trim());
+    lastQuiz = { type, items: json.questions||[] };
+    renderQuiz();
+  }catch(err){
+    $("quizArea").innerHTML = '<div class="empty-ask">'+esc(err.message==="NO_KEY"?"Add your API key in settings.":("Couldn't generate questions. "+err.message))
+      +'<br/><br/><button class="ghost-btn" onclick="generateQuiz()">Try again</button></div>';
+  }finally{
+    $("genBtn").disabled = false;
+  }
+}
+
+function renderQuiz(){
+  if(!lastQuiz || !lastQuiz.items.length){ $("quizArea").innerHTML='<div class="empty-ask">No questions returned. Try again.</div>'; return; }
+  const t = lastQuiz.type;
+  let html = '<div class="quiz-list">';
+  lastQuiz.items.forEach((it, i)=>{
+    html += '<div class="q-card"><div class="qn">Q'+(i+1)+'</div><div class="qt">'+esc(it.q||"")+'</div>';
+    if(t==="mcq" && Array.isArray(it.options)){
+      html += '<div class="opts" data-correct="'+(it.correct??0)+'" data-i="'+i+'">';
+      it.options.forEach((op, oi)=>{
+        const L = String.fromCharCode(65+oi);
+        html += '<div class="opt" onclick="pickOpt('+i+','+oi+')"><span class="lt">'+L+'</span><span>'+esc(op)+'</span></div>';
+      });
+      html += '</div>';
+      if(it.why) html += '<div class="answer-box" id="ans'+i+'"><div class="lbl">Why</div>'+esc(it.why)+'</div>';
+    }else{
+      html += '<button class="reveal-btn" onclick="toggleAns('+i+')">Reveal answer</button>';
+      html += '<div class="answer-box" id="ans'+i+'"><div class="lbl">Answer</div>'+esc(it.answer||"")+'</div>';
+    }
+    html += '</div>';
+  });
+  html += '</div>';
+  html += '<div class="quiz-actions">'
+        + '<button class="ghost-btn" onclick="copyQuiz()">Copy all</button>'
+        + '<button class="ghost-btn" onclick="downloadQuiz()">Download .txt</button>'
+        + '<button class="ghost-btn" onclick="generateQuiz()">Regenerate</button></div>';
+  $("quizArea").innerHTML = html;
+}
+function pickOpt(qi, oi){
+  const wrap = document.querySelectorAll(".opts")[qi]; if(!wrap || wrap.dataset.done) return;
+  const correct = parseInt(wrap.dataset.correct,10);
+  const opts = wrap.querySelectorAll(".opt");
+  opts[correct].classList.add("correct");
+  if(oi!==correct) opts[oi].classList.add("wrong");
+  wrap.dataset.done = "1";
+  const ans = $("ans"+qi); if(ans) ans.classList.add("show");
+}
+function toggleAns(i){ $("ans"+i).classList.toggle("show"); }
+
+function quizToText(){
+  if(!lastQuiz) return "";
+  let out = "Practice questions — from "+S.doc.name+"\n\n";
+  lastQuiz.items.forEach((it,i)=>{
+    out += (i+1)+". "+it.q+"\n";
+    if(lastQuiz.type==="mcq" && it.options){
+      it.options.forEach((op,oi)=> out += "   "+String.fromCharCode(65+oi)+") "+op+"\n");
+      out += "   Answer: "+String.fromCharCode(65+(it.correct??0))+(it.why?"  ("+it.why+")":"")+"\n";
+    }else{
+      out += "   Answer: "+(it.answer||"")+"\n";
+    }
+    out += "\n";
+  });
+  return out;
+}
+function copyQuiz(){ navigator.clipboard.writeText(quizToText()).then(()=>toast("Copied to clipboard.")); }
+function downloadQuiz(){
+  const blob = new Blob([quizToText()], {type:"text/plain"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = S.doc.name.replace(/\.[^.]+$/,"") + " - practice.txt";
+  a.click(); URL.revokeObjectURL(a.href);
+}
+
+/* ===================== PWA: icon, manifest, service worker ===================== */
+(function setupPWA(){
+  // canvas icon
+  const c = document.createElement("canvas"); c.width=c.height=192;
+  const x = c.getContext("2d");
+  x.fillStyle="#0a0a0c"; x.fillRect(0,0,192,192);
+  x.strokeStyle="#d4af37"; x.lineWidth=6; x.strokeRect(16,16,160,160);
+  x.fillStyle="#d4af37"; x.font="700 64px Georgia, serif"; x.textAlign="center"; x.textBaseline="middle";
+  x.fillText("Dt", 96, 102);
+  const icon = c.toDataURL("image/png");
+  let link = document.createElement("link"); link.rel="apple-touch-icon"; link.href=icon; document.head.appendChild(link);
+
+  const manifest = {
+    name:"DocTutor", short_name:"DocTutor", start_url:".", display:"standalone",
+    background_color:"#0a0a0c", theme_color:"#0a0a0c",
+    description:"Turn any document into your personal tutor.",
+    icons:[{src:icon,sizes:"192x192",type:"image/png"},{src:icon,sizes:"512x512",type:"image/png"}]
+  };
+  const mURL = URL.createObjectURL(new Blob([JSON.stringify(manifest)],{type:"application/json"}));
+  let ml = document.createElement("link"); ml.rel="manifest"; ml.href=mURL; document.head.appendChild(ml);
+
+  if("serviceWorker" in navigator){
+    const sw = `self.addEventListener("install",e=>self.skipWaiting());
+      self.addEventListener("activate",e=>self.clients.claim());
+      self.addEventListener("fetch",e=>{});`;
+    const swURL = URL.createObjectURL(new Blob([sw],{type:"text/javascript"}));
+    navigator.serviceWorker.register(swURL).catch(()=>{});
+  }
+})();
+
+/* ===================== init ===================== */
+loadSettings();
+$("settingsModal").addEventListener("click", e=>{ if(e.target.id==="settingsModal") closeSettings(); });
+</script>
+</body>
+</html>
