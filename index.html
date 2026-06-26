@@ -461,6 +461,12 @@ function saveSettings(){
   try{ localStorage.setItem("doctutor_settings", JSON.stringify({apiKey:S.apiKey, model:S.model})); }catch(e){}
   reflectKey(); closeSettings();
   toast(S.apiKey ? "Claude connected." : "Key cleared.");
+  // If a document is already loaded and the summary never ran (key added late), run it now
+  if(S.apiKey && S.doc && !S.summaryDone){
+    const active = document.querySelector(".tab.active")?.dataset.tab;
+    if(active !== "summary") switchTab("summary");
+    runSummary();
+  }
 }
 
 /* ===================== toast ===================== */
