@@ -17,6 +17,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
 <style>
   :root{
@@ -139,6 +140,15 @@
   .source-meta .fn{font-weight:600;font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .source-meta .st{font-family:"DM Mono",monospace;font-size:11px;color:var(--muted);margin-top:3px;letter-spacing:.3px}
   .source-meta .st .warn{color:var(--bad)}
+
+  .meter{
+    margin-top:10px;display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px;
+    border:1px solid var(--line-soft);border-left:2px solid var(--gold);
+    border-radius:0 9px 9px 0;background:rgba(212,175,55,.045);
+    padding:8px 13px;font-family:"DM Mono",monospace;
+  }
+  .meter .m-lead{font-size:12px;color:var(--gold-soft);font-weight:500;letter-spacing:.2px}
+  .meter .m-sub{font-size:10.5px;color:var(--muted);letter-spacing:.2px}
 
   .tabs{display:flex;gap:4px;margin:22px 0 18px;border-bottom:1px solid var(--line-soft);position:sticky;top:64px;z-index:30;background:var(--bg)}
   .tab{
@@ -327,6 +337,8 @@
         <button class="ghost-btn" onclick="resetDoc()">Replace</button>
       </div>
 
+      <div class="meter" id="meter" style="display:none"></div>
+
       <div class="tabs">
         <button class="tab active" data-tab="summary" onclick="switchTab('summary')"><span class="n">01</span> Summary</button>
         <button class="tab" data-tab="ask" onclick="switchTab('ask')"><span class="n">02</span> Ask</button>
@@ -351,6 +363,9 @@
               <button class="chip" onclick="quickAsk('Give me a real-world example of a concept from this document')">Give an example</button>
             </div>
           </div>
+        </div>
+        <div id="askActions" style="display:none;margin-bottom:10px">
+          <button class="ghost-btn" onclick="exportAskPDF()">Download Q&amp;A as PDF</button>
         </div>
         <div class="ask-bar">
           <textarea id="askInput" rows="1" placeholder="Ask about your document…"></textarea>
@@ -514,6 +529,7 @@ async function handleFile(file){
     const tokens = Math.round(text.length/4);
     S.doc = { name:file.name, ext, text, words, tokens, units };
     S.history = []; S.summaryDone = false;
+    resetSession();
 
     let stat = words.toLocaleString() + " words · ~" + tokens.toLocaleString() + " tokens";
     if(units) stat += " · " + units;
@@ -582,8 +598,13 @@ function switchTab(t){
 }
 
 /* ===================== Claude API ===================== */
-async function callClaude(system, messages, maxTokens){
+async function callClaude(instructions, messages, maxTokens){
   if(!S.apiKey){ throw new Error("NO_KEY"); }
+  // The document is identical across every call, so cache it as a prefix block (90% cheaper on reuse).
+  // Task-specific instructions go in a separate block AFTER the cached one so the cache key stays stable.
+  const system = [];
+  if(S.doc){ system.push({ type:"text", text:docContext(), cache_control:{ type:"ephemeral" } }); }
+  system.push({ type:"text", text:instructions });
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method:"POST",
     headers:{
@@ -603,10 +624,51 @@ async function callClaude(system, messages, maxTokens){
     throw new Error(detail || ("API error "+res.status));
   }
   const data = await res.json();
+  if(data.usage) recordUsage(data.usage);
   return data.content.filter(b=>b.type==="text").map(b=>b.text).join("\n");
 }
 function docContext(){
   return "=== DOCUMENT: " + S.doc.name + " ===\n\n" + S.doc.text + "\n\n=== END OF DOCUMENT ===";
+}
+
+/* ----- token savings (prompt caching) ----- */
+// USD per token. cacheRead = 0.10x input, cacheWrite(5m) = 1.25x input.
+const PRICES = {
+  "claude-sonnet-4-6":        { in:3/1e6,  out:15/1e6, cacheRead:0.30/1e6, cacheWrite:3.75/1e6 },
+  "claude-haiku-4-5-20251001":{ in:1/1e6,  out:5/1e6,  cacheRead:0.10/1e6, cacheWrite:1.25/1e6 },
+  "claude-opus-4-8":          { in:5/1e6,  out:25/1e6, cacheRead:0.50/1e6, cacheWrite:6.25/1e6 }
+};
+const sess = { in:0, cacheRead:0, cacheWrite:0, out:0, calls:0 };
+function resetSession(){ sess.in=sess.cacheRead=sess.cacheWrite=sess.out=sess.calls=0; const m=$("meter"); if(m) m.style.display="none"; }
+function recordUsage(u){
+  sess.calls++;
+  sess.in        += u.input_tokens||0;
+  sess.cacheRead += u.cache_read_input_tokens||0;
+  sess.cacheWrite+= u.cache_creation_input_tokens||0;
+  sess.out       += u.output_tokens||0;
+  renderMeter();
+}
+function kfmt(n){ return n>=1000 ? (n/1000).toFixed(n>=10000?0:1)+"k" : String(n); }
+function usd(n){ return n>=0.01 ? "$"+n.toFixed(3) : n>0 ? "$"+n.toFixed(4) : "$0"; }
+function renderMeter(){
+  const p = PRICES[S.model] || PRICES["claude-sonnet-4-6"];
+  const inputTokens = sess.in + sess.cacheRead + sess.cacheWrite;
+  const noCacheCost  = inputTokens * p.in;                                   // if we'd resent everything full price
+  const withCacheCost= sess.in*p.in + sess.cacheRead*p.cacheRead + sess.cacheWrite*p.cacheWrite;
+  const saved = Math.max(0, noCacheCost - withCacheCost);
+  const pct = noCacheCost>0 ? Math.round(saved/noCacheCost*100) : 0;
+  const spent = withCacheCost + sess.out*p.out;
+  const m = $("meter"); if(!m) return;
+  m.style.display = "flex";
+  if(sess.cacheRead>0){
+    m.innerHTML =
+      '<span class="m-lead">\u26a1 Cache saved ~'+usd(saved)+' ('+pct+'%)</span>'
+      + '<span class="m-sub">'+kfmt(sess.cacheRead)+' tokens reused \u00b7 '+kfmt(sess.in)+' new \u00b7 ~'+usd(spent)+' this session</span>';
+  } else {
+    m.innerHTML =
+      '<span class="m-lead">\u26a1 Caching armed</span>'
+      + '<span class="m-sub">document cached \u00b7 reuse kicks in on your next question \u00b7 ~'+usd(spent)+' this session</span>';
+  }
 }
 function needKeyBlock(action){
   return '<div class="empty-ask">Add your Claude API key to '+action+'.<br/><br/>'
@@ -623,10 +685,13 @@ async function runSummary(){
     + "Write for a student. Use this exact HTML structure with these tags only (h4, p, ul, li, strong): "
     + "an <h4>Overview</h4> with one short paragraph; an <h4>Key Points</h4> with a <ul> of 4-7 concise bullets; "
     + "and an <h4>Worth Remembering</h4> with one paragraph naming the few things most likely to be tested or to matter. "
-    + "Do not wrap output in code fences.\n\n" + docContext();
+    + "Do not wrap output in code fences.";
   try{
     const out = await callClaude(system, [{role:"user", content:"Summarise this document."}], 1400);
-    $("summaryArea").innerHTML = '<div class="sum-body">' + cleanHtml(out) + '</div>';
+    $("summaryArea").innerHTML = '<div class="sum-body">' + cleanHtml(out) + '</div>'
+      + '<div class="quiz-actions">'
+      + '<button class="ghost-btn" onclick="exportSummaryPDF()">Download PDF</button>'
+      + '<button class="ghost-btn" onclick="runSummary()">Regenerate</button></div>';
   }catch(err){
     S.summaryDone = false;
     if(err.message==="NO_KEY"){ $("summaryArea").innerHTML = needKeyBlock("summarise this document"); return; }
@@ -650,6 +715,7 @@ function resetAskPanel(){
     + '<button class="chip" onclick="quickAsk(\'What are the most important points I should remember?\')">Key points to remember</button>'
     + '<button class="chip" onclick="quickAsk(\'Give me a real-world example of a concept from this document\')">Give an example</button>'
     + '</div></div>';
+  const aa = $("askActions"); if(aa) aa.style.display = "none";
 }
 function quickAsk(q){ askInput.value=q; sendQuestion(); }
 
@@ -673,7 +739,7 @@ async function sendQuestion(){
     "You are a tutor answering questions strictly from the document below. "
     + "Rules: (1) Use ONLY information in the document. (2) If the answer is not in the document, say clearly that the document doesn't cover it — do not guess. "
     + "(3) Be clear and concise for a student. (4) When helpful, briefly point to where in the document it comes from. "
-    + "Output plain readable text; you may use short paragraphs and simple bullet lines starting with '- '.\n\n" + docContext();
+    + "Output plain readable text; you may use short paragraphs and simple bullet lines starting with '- '.";
 
   S.history.push({role:"user", content:q});
   const msgs = S.history.slice(-8);
@@ -685,6 +751,7 @@ async function sendQuestion(){
     $(thinkId).innerHTML = '<div class="a-head">TUTOR</div><p style="color:var(--bad)">'+esc(err.message==="NO_KEY"?"Add your API key in settings.":err.message)+'</p>';
   }finally{
     $("sendBtn").disabled = false;
+    $("askActions").style.display = S.history.some(m=>m.role==="assistant") ? "block" : "none";
     window.scrollTo({top:document.body.scrollHeight,behavior:"smooth"});
   }
 }
@@ -731,7 +798,7 @@ async function generateQuiz(){
     "You write exam practice questions based ONLY on the document below. Every question and answer must be answerable from the document — no outside knowledge. "
     + "Difficulty: "+diff+". Create "+count+" "+typeName+" questions. "
     + "Respond with ONLY valid JSON, no markdown, no commentary, in exactly this shape: "+shape+" "
-    + "For MCQ, 'correct' is the 0-based index of the right option.\n\n" + docContext();
+    + "For MCQ, 'correct' is the 0-based index of the right option.";
   try{
     const out = await callClaude(system, [{role:"user", content:"Generate the questions as JSON only."}], 3200);
     const json = JSON.parse(out.replace(/```json?/gi,"").replace(/```/g,"").trim());
@@ -767,6 +834,7 @@ function renderQuiz(){
   });
   html += '</div>';
   html += '<div class="quiz-actions">'
+        + '<button class="ghost-btn" onclick="exportQuizPDF()">Download PDF</button>'
         + '<button class="ghost-btn" onclick="copyQuiz()">Copy all</button>'
         + '<button class="ghost-btn" onclick="downloadQuiz()">Download .txt</button>'
         + '<button class="ghost-btn" onclick="generateQuiz()">Regenerate</button></div>';
@@ -805,6 +873,141 @@ function downloadQuiz(){
   a.href = URL.createObjectURL(blob);
   a.download = S.doc.name.replace(/\.[^.]+$/,"") + " - practice.txt";
   a.click(); URL.revokeObjectURL(a.href);
+}
+
+/* ===================== PDF export ===================== */
+function exportPDF(section, blocks){
+  if(!window.jspdf || !window.jspdf.jsPDF){ toast("PDF engine still loading — try again in a moment.", true); return; }
+  const doc = new window.jspdf.jsPDF({unit:"mm", format:"a4"});
+  const PW=210, PH=297, ML=18, MR=18, MT=32, MB=22, CW=PW-ML-MR;
+  const GOLD=[150,120,30], RULE=[200,180,120], INK=[45,45,45], DIM=[150,150,150], TEAL=[20,95,72];
+  const docName = S.doc ? S.doc.name : "document";
+  let y = MT;
+
+  function chrome(){
+    doc.setFont("times","bold"); doc.setFontSize(11); doc.setTextColor(GOLD[0],GOLD[1],GOLD[2]);
+    doc.setCharSpace(0.5); doc.text("DOCTUTOR", ML, 15); doc.setCharSpace(0);
+    doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor(DIM[0],DIM[1],DIM[2]);
+    doc.text(section.toUpperCase(), PW-MR, 15, {align:"right"});
+    doc.setDrawColor(GOLD[0],GOLD[1],GOLD[2]); doc.setLineWidth(0.5); doc.line(ML,18,PW-MR,18);
+    doc.setDrawColor(220,220,220); doc.setLineWidth(0.3); doc.line(ML,PH-16,PW-MR,PH-16);
+    doc.setFont("helvetica","normal"); doc.setFontSize(7.5); doc.setTextColor(160,160,160);
+    doc.text(doc.splitTextToSize(docName,105)[0], ML, PH-11);
+  }
+  function ensure(h){ if(y+h > PH-MB){ doc.addPage(); chrome(); y=MT; } }
+  function para(text, o){
+    o=o||{};
+    const size=o.size||10.5, lh=o.lh||5, indent=o.indent||0, col=o.color||INK;
+    doc.setFont(o.font||"helvetica", o.weight||"normal"); doc.setFontSize(size);
+    doc.setTextColor(col[0],col[1],col[2]);
+    if(o.cs) doc.setCharSpace(o.cs);
+    const lines = doc.splitTextToSize(text, CW-indent);
+    for(const ln of lines){ ensure(lh); doc.text(ln, ML+indent, y); y+=lh; }
+    if(o.cs) doc.setCharSpace(0);
+    if(o.after) y+=o.after;
+  }
+  function bullet(text){
+    const lh=5;
+    doc.setFont("helvetica","normal"); doc.setFontSize(10.5);
+    const lines = doc.splitTextToSize(text, CW-6);
+    ensure(lh);
+    doc.setTextColor(GOLD[0],GOLD[1],GOLD[2]); doc.text("\u2022", ML+1, y);
+    doc.setTextColor(INK[0],INK[1],INK[2]);
+    for(let i=0;i<lines.length;i++){ if(i>0) ensure(lh); doc.text(lines[i], ML+6, y); y+=lh; }
+  }
+  function heading(text){ ensure(10); y+=2; para(text,{font:"times",weight:"bold",size:12.5,color:GOLD,cs:0.3,after:1.5}); }
+  function rule(){ ensure(5); doc.setDrawColor(RULE[0],RULE[1],RULE[2]); doc.setLineWidth(0.3); doc.line(ML,y,PW-MR,y); y+=5; }
+
+  // title page header + title block
+  chrome();
+  doc.setFont("times","bold"); doc.setFontSize(22); doc.setTextColor(30,30,30);
+  doc.text(section, ML, y+3); y+=10;
+  doc.setFont("helvetica","normal"); doc.setFontSize(9); doc.setTextColor(135,135,135);
+  doc.text(docName + "   \u00b7   " + new Date().toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"}), ML, y); y+=4;
+  doc.setDrawColor(GOLD[0],GOLD[1],GOLD[2]); doc.setLineWidth(0.6); doc.line(ML,y,PW-MR,y); y+=8;
+
+  // body
+  for(const blk of blocks){
+    if(blk.h) heading(blk.h);
+    else if(blk.p) para(blk.p,{after:3});
+    else if(blk.b){ for(const it of blk.b) bullet(it); y+=2; }
+    else if(blk.q) para(blk.q,{weight:"bold",size:11,color:[30,30,30],after:1.5});
+    else if(blk.opt) para(blk.opt,{indent:5,after:0.8});
+    else if(blk.ans) para(blk.ans,{indent:3,color:TEAL,size:10,after:3});
+    else if(blk.rule) rule();
+    else if(blk.sp) y+=blk.sp;
+  }
+
+  // page numbers + credit on every page
+  const total = doc.getNumberOfPages();
+  for(let i=1;i<=total;i++){
+    doc.setPage(i);
+    doc.setFont("helvetica","normal"); doc.setFontSize(7.5); doc.setTextColor(160,160,160);
+    doc.text("Page "+i+" of "+total, PW-MR, PH-11, {align:"right"});
+    doc.setFontSize(6.8); doc.setTextColor(175,175,175);
+    doc.text("Designed & Architected by Krishnamurthy Kandregula \u00b7 Made by Claude", PW/2, PH-6.5, {align:"center"});
+  }
+
+  doc.save(docName.replace(/\.[^.]+$/,"") + " - " + section + ".pdf");
+  toast(section + " saved as PDF.");
+}
+
+function summaryBlocks(){
+  const root = document.querySelector("#summaryArea .sum-body");
+  if(!root) return null;
+  const blocks=[];
+  root.childNodes.forEach(n=>{
+    if(n.nodeType!==1) return;
+    const tag=n.tagName.toLowerCase();
+    if(tag==="h4"){ const t=n.textContent.trim(); if(t) blocks.push({h:t}); }
+    else if(tag==="p"){ const t=n.textContent.trim(); if(t) blocks.push({p:t}); }
+    else if(tag==="ul"){
+      const items=[...n.querySelectorAll("li")].map(li=>li.textContent.trim()).filter(Boolean);
+      if(items.length) blocks.push({b:items});
+    }
+  });
+  return blocks.length?blocks:null;
+}
+function exportSummaryPDF(){
+  const b=summaryBlocks();
+  if(!b) return toast("Generate the summary first.", true);
+  exportPDF("Summary", b);
+}
+
+function answerToBlocks(text){
+  const out=[]; let bul=[];
+  text.split("\n").forEach(raw=>{
+    const line=raw.trim();
+    if(/^[-\u2022]\s+/.test(line)){ bul.push(line.replace(/^[-\u2022]\s+/,"")); }
+    else { if(bul.length){ out.push({b:bul}); bul=[]; } if(line) out.push({p:line}); }
+  });
+  if(bul.length) out.push({b:bul});
+  return out;
+}
+function exportAskPDF(){
+  if(!S.history.length) return toast("Ask a question first.", true);
+  const blocks=[];
+  S.history.forEach(m=>{
+    if(m.role==="user") blocks.push({q:"Q.  "+m.content});
+    else { answerToBlocks(m.content).forEach(p=>blocks.push(p)); blocks.push({rule:true}); }
+  });
+  exportPDF("Q&A Notes", blocks);
+}
+
+function exportQuizPDF(){
+  if(!lastQuiz || !lastQuiz.items.length) return toast("Generate questions first.", true);
+  const blocks=[];
+  lastQuiz.items.forEach((it,i)=>{
+    blocks.push({q:(i+1)+".  "+(it.q||"")});
+    if(lastQuiz.type==="mcq" && Array.isArray(it.options)){
+      it.options.forEach((op,oi)=> blocks.push({opt:String.fromCharCode(65+oi)+")  "+op}));
+      blocks.push({ans:"Answer: "+String.fromCharCode(65+(it.correct??0))+(it.why?"  \u2014  "+it.why:"")});
+    } else {
+      blocks.push({ans:"Answer: "+(it.answer||"")});
+    }
+    blocks.push({sp:3});
+  });
+  exportPDF("Practice Questions", blocks);
 }
 
 /* ===================== PWA: icon, manifest, service worker ===================== */
